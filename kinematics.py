@@ -1,155 +1,224 @@
 import math
-from math import cos, pi, sin, acos, atan, sqrt
+from constants import *
+from scipy.optimize import minimize
+import numpy as np
+
+# Given the sizes (a, b, c) of the 3 sides of a triangle, returns the angle between a and b using the alKashi theorem.
+def alKashi(a, b, c, sign=-1):
+    if a * b == 0:
+        print("WARNING a or b is null in AlKashi")
+        return 0
+    # Note : to get the other altenative, simply change the sign of the return :
+    return sign * math.acos(min(1, max(-1, (a ** 2 + b ** 2 - c ** 2) / (2 * a * b))))
 
 
-# Dimensions used for the PhantomX robot :
-'''constL1 = 54.8
-constL2 = 65.3
-constL3 = 133
-theta2Correction = 0  # A completer
-theta3Correction = 0  # A completer'''
+# Computes the direct kinematics of a leg in the leg's frame
+# Given the angles (theta1, theta2, theta3) of a limb with 3 rotational axes separated by the distances (l1, l2, l3),
+# returns the destination point (x, y, z)
+def computeDK(
+    theta1,
+    theta2,
+    theta3,
+    l1=constL1,
+    l2=constL2,
+    l3=constL3,
+    use_rads=USE_RADS_INPUT,
+    use_mm=USE_MM_OUTPUT,
+):
+    angle_unit = 1
+    dist_unit = 1
+    if not (use_rads):
+        angle_unit = math.pi / 180.0
+    if use_mm:
+        dist_unit = 1000
+    theta1 = THETA1_MOTOR_SIGN * theta1 * angle_unit
+    theta2 = (THETA2_MOTOR_SIGN * theta2 - theta2Correction) * angle_unit
+    theta3 = (THETA3_MOTOR_SIGN * theta3 - theta3Correction) * angle_unit
+    # print(
+    #     "corrected angles={}, {}, {}".format(
+    #         theta1 * (1.0 / angle_unit),
+    #         theta2 * (1.0 / angle_unit),
+    #         theta3 * (1.0 / angle_unit),
+    #     )
+    # )
 
-# Dimensions used for the simple arm simulation
-bx = 0.07
-bz = 0.25
-constL1 = 0.085
-constL2 = 0.185
-constL3 = 0.250
+    planContribution = l1 + l2 * math.cos(theta2) + l3 * math.cos(theta2 + theta3)
 
-def AlKashi(a,b,c):
-    if a!=0 or b!=0:
-        return acos(((a**2) + (b**2) - (c**2)) / (2*(a*b)))
-
-def rotaton_2D(x, y, z, theta):
-    # A compléter
-    return 
-
-
-
-def computeDK(theta1, theta2, theta3, l1=constL1, l2=constL2, l3=constL3):
-    ##############TERMINAL##########################
-    '''theta1rad = (theta1*(pi/180))
-    theta2rad = (theta2*(pi/180))
-    theta3rad = (theta3*(pi/180))
-
-    x = ((l1+l2*cos(theta2rad)+l3*cos(theta3rad+theta2rad))*cos(theta1rad))
-    y = ((l1+l2*cos(theta2rad)+l3*cos(theta3rad+theta2rad))*sin(theta1rad))
-    z = (l2*sin(theta2rad)+l3*sin(theta2rad+theta3rad))'''
-
-
-    ##############SIMULATION########################
-    x = ((l1 + l2*cos(theta2) + l3*cos(theta3+theta2)) * cos(theta1))
-    y = ((l1 + l2*cos(theta2) + l3*cos(theta3+theta2)) * sin(theta1))
-    z = -(l2*sin(theta2) + l3*sin(theta2+theta3))
-
-
+    x = math.cos(theta1) * planContribution * dist_unit
+    y = math.sin(theta1) * planContribution * dist_unit
+    z = -(l2 * math.sin(theta2) + l3 * math.sin(theta2 + theta3)) * dist_unit
 
     return [x, y, z]
 
 
-def computeIK(x, y, z, l1=constL1, l2=constL2, l3=constL3):
+def computeDKDetailed(
+    theta1,
+    theta2,
+    theta3,
+    l1=constL1,
+    l2=constL2,
+    l3=constL3,
+    use_rads=USE_RADS_INPUT,
+    use_mm=USE_MM_OUTPUT,
+):
+    theta1_verif = theta1
+    theta2_verif = theta2
+    theta3_verif = theta3
+    angle_unit = 1
+    dist_unit = 1
+    if not (use_rads):
+        angle_unit = math.pi / 180.0
+    if use_mm:
+        dist_unit = 1000
+    theta1 = THETA1_MOTOR_SIGN * theta1 * angle_unit
+    theta2 = (THETA2_MOTOR_SIGN * theta2 - theta2Correction) * angle_unit
+    theta3 = (THETA3_MOTOR_SIGN * theta3 - theta3Correction) * angle_unit
 
-    pasttheta1 = 0
-    pasttheta2 = 0
-    pasttheta3 = 0
+    # print(
+    #     "corrected angles={}, {}, {}".format(
+    #         theta1 * (1.0 / angle_unit),
+    #         theta2 * (1.0 / angle_unit),
+    #         theta3 * (1.0 / angle_unit),
+    #     )
+    # )
 
-# 'dp' = 'dproj' => projection au sol de la distance P0 et P3proj
-    dp = sqrt((x**2) + (y**2))
-# 'd1' = 'd13'  => distance P1 - P3proj 
-    d1 = dp - l1
+    planContribution = l1 + l2 * math.cos(theta2) + l3 * math.cos(theta2 + theta3)
 
-    if d1 < 0:
-# 
-        d1 = 1
+    x = math.cos(theta1) * planContribution
+    y = math.sin(theta1) * planContribution
+    z = -(l2 * math.sin(theta2) + l3 * math.sin(theta2 + theta3))
 
-# 'd' hypothénuse de (P1, P3, P3proj)
-    d = sqrt(d1**2+z**2)
+    p0 = [0, 0, 0]
+    p1 = [l1 * math.cos(theta1) * dist_unit, l1 * math.sin(theta1) * dist_unit, 0]
+    p2 = [
+        (l1 + l2 * math.cos(theta2)) * math.cos(theta1) * dist_unit,
+        (l1 + l2 * math.cos(theta2)) * math.sin(theta1) * dist_unit,
+        -l2 * math.sin(theta2) * dist_unit,
+    ]
+    p3 = [x * dist_unit, y * dist_unit, z * dist_unit]
+    p3_verif = computeDK(
+        theta1_verif, theta2_verif, theta3_verif, l1, l2, l3, use_rads, use_mm
+    )
+    if (p3[0] != p3_verif[0]) or (p3[1] != p3_verif[1]) or (p3[2] != p3_verif[2]):
+        print(
+            "ERROR: the DK function is broken!!! p3 = {}, p3_verif = {}".format(
+                p3, p3_verif
+            )
+        )
 
-    if d > l2+l3:
-#'l2+l3' est la longueur MAX de 'd'
-        d = l2+l3
-    if d < -1:
-        d = 1
-
-    a = atan(z/d1.real)
-    b = AlKashi(l2, d, l3)
-
-    if x==0 and y==0:
-        theta1 = pasttheta1
-        theta2 = pasttheta2
-        theta3 = pasttheta3
+    return [p0, p1, p2, p3]
 
 
-    elif x<0:
-        theta1 = -atan(y/x+1)
-        theta2 = (a + b)
-        theta3 = -AlKashi(l2,l3,d)+pi
+# Computes the inverse kinematics of a leg in the leg's frame
+# Given the destination point (x, y, z) of a limb with 3 rotational axes separated by the distances (l1, l2, l3),
+# returns the angles to apply to the 3 axes
+def computeIK(
+    x,
+    y,
+    z,
+    l1=constL1,
+    l2=constL2,
+    l3=constL3,
+    verbose=False,
+    use_rads=USE_RADS_OUTPUT,
+    sign=-1,
+    use_mm=USE_MM_INPUT,
+):
+    dist_unit = 1
+    if use_mm:
+        dist_unit = 0.001
+    x = x * dist_unit
+    y = y * dist_unit
+    z = z * dist_unit
 
-        pasttheta1 = theta1
-        pasttheta2 = -theta2
-        pasttheta3 = -theta3
+    # theta1 is simply the angle of the leg in the X/Y plane. We have the first angle we wanted.
+    if y == 0 and x == 0:
+        # Taking care of this singularity (leg right on top of the first rotational axis)
+        theta1 = 0
+    else:
+        theta1 = math.atan2(y, x)
+
+    # Distance between the second motor and the projection of the end of the leg on the X/Y plane
+    xp = math.sqrt(x * x + y * y) - l1
+    # if xp < 0:
+    #     print("Destination point too close")
+    #     xp = 0
+
+    # Distance between the second motor arm and the end of the leg
+    d = math.sqrt(math.pow(xp, 2) + math.pow(z, 2))
+    # if d > l2 + l3:
+    #     print("Destination point too far away")
+    #     d = l2 + l3
+
+    # Knowing l2, l3 and d, theta1 and theta2 can be computed using the Al Kashi law
+    # There are 2 solutions for most of the points, forcing a convention here
+    theta2 = alKashi(l2, d, l3, sign=sign) - Z_DIRECTION * math.atan2(z, xp)
+    theta3 = math.pi + alKashi(l2, l3, d, sign=sign)
+
+    if use_rads:
+
+        result = [
+            angleRestrict(THETA1_MOTOR_SIGN * theta1, use_rads=use_rads),
+            angleRestrict(
+                THETA2_MOTOR_SIGN * (theta2 + theta2Correction), use_rads=use_rads
+            ),
+            angleRestrict(
+                THETA3_MOTOR_SIGN * (theta3 + theta3Correction), use_rads=use_rads
+            ),
+        ]
 
     else:
-        theta1 = atan(y/ x)                                            
-        theta2 = a + b                                    
-        theta3 = AlKashi(l2,l3,d)+pi
-
-        pasttheta1 = theta1
-        pasttheta2 = -theta2
-        pasttheta3 = -theta3
-
-    return [theta1, -theta2, -theta3]
-
-
-def main():
-    
-    
-   
-    print("Testing the kinematic funtions...")
-    print("L1 + L2 + L3= {}".format(
-        constL1+constL2+constL3
-    ) )
-
-    ############ TEST COMPUTEIK ###################
-    print(
-        "computeIK(10, 90, 99) = {}".format(
-            computeIK(10, 90, 99, l1=constL1, l2=constL2, l3=constL3) # attendu: [253.1, 0, 0]
-
+        result = [
+            angleRestrict(THETA1_MOTOR_SIGN * math.degrees(theta1), use_rads=use_rads),
+            angleRestrict(
+                THETA2_MOTOR_SIGN * (math.degrees(theta2) + theta2Correction),
+                use_rads=use_rads,
+            ),
+            angleRestrict(
+                THETA3_MOTOR_SIGN * (math.degrees(theta3) + theta3Correction),
+                use_rads=use_rads,
+            ),
+        ]
+    if verbose:
+        print(
+            "Asked IK for x={}, y={}, z={}\n, --> theta1={}, theta2={}, theta3={}".format(
+                x,
+                y,
+                z,
+                result[0],
+                result[1],
+                result[2],
+            )
         )
-    )
-    print(
-        "computeIK(90, 7, 11) = {}".format(
-            computeIK(90, 7, 11, l1=constL1, l2=constL2, l3=constL3)# attendu: [0, 246, 49]
 
-        )
-    )
-    print(
-        "computeIK(90, 88, 63) = {}".format(
-            computeIK(90, 88, 63, l1=constL1, l2=constL2, l3=constL3)# arrendu: [0, -59, 129]
+    return result
 
-        )
-    )
-    ############ TEST COMPUTEDK ####################
-    '''
-    print(
-        "computeDK(0, 0, 0) = {}".format(
-            computeDK(0, 0, 0, l1=constL1, l2=constL2, l3=constL3) # attendu: [253.1, 0, 0]
 
-        )
-    )
-    print(
-        "computeDK(90, 7, 11) = {}".format(
-            computeDK(90, 7, 11, l1=constL1, l2=constL2, l3=constL3)# attendu: [0, 246, 49]
+def angleRestrict(angle, use_rads=False):
+    if use_rads:
+        return modulopi(angle)
+    else:
+        return modulo180(angle)
 
-        )
-    )
-    print(
-        "computeDK(90, 88, 63) = {}".format(
-            computeDK(90, 88, 63, l1=constL1, l2=constL2, l3=constL3)# arrendu: [0, -59, 129]
 
-        )
-    )
-    '''
+# Takes an angle that's between 0 and 360 and returns an angle that is between -180 and 180
+def modulo180(angle):
+    if -180 < angle < 180:
+        return angle
 
-if __name__ == "__main__":
-    main()
+    angle = angle % 360
+    if angle > 180:
+        return -360 + angle
+
+    return angle
+
+
+def modulopi(angle):
+    if -math.pi < angle < math.pi:
+        return angle
+
+    angle = angle % (math.pi * 2)
+    if angle > math.pi:
+        return -math.pi * 2 + angle
+
+    return angle
