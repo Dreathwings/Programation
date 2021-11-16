@@ -1,5 +1,3 @@
-Robotics initiation class materials by Passault Grégoire, Olivier Ly and Remi Fabre is licensed under a [Creative Commons Attribution 4.0 International License](https://creativecommons.org/licenses/by/4.0/).
-
 # Simulation
 A simple simulation based on PyBullet.
 
